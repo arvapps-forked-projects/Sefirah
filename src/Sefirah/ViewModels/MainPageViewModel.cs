@@ -2,6 +2,7 @@ using Sefirah.Data.AppDatabase.Repository;
 using Sefirah.Data.Contracts;
 using Sefirah.Data.Enums;
 using Sefirah.Data.Models;
+using Sefirah.Utils;
 using Sefirah.Utils.Serialization;
 
 namespace Sefirah.ViewModels;
@@ -38,7 +39,7 @@ public sealed partial class MainPageViewModel : BaseViewModel
             var message = new CommandMessage { CommandType = CommandType.Disconnect };
             SessionManager.SendMessage(Device.Session!, SocketMessageSerializer.Serialize(message));
             await Task.Delay(50);
-            if (Device.Session != null)
+            if (Device.Session is not null)
             {
                 SessionManager.DisconnectSession(Device.Session);
             }
@@ -98,10 +99,10 @@ public sealed partial class MainPageViewModel : BaseViewModel
     [RelayCommand]
     public void SetRingerMode(string? modeStr)
     {
-        if (int.TryParse(modeStr, out int mode) && Device?.Session != null)
+        if (int.TryParse(modeStr, out int mode))
         {
             var message = new DeviceRingerMode { RingerMode = mode };
-            SessionManager.SendMessage(Device.Session, SocketMessageSerializer.Serialize(message));
+            SessionManager.SendMessage(Device!.Session!, SocketMessageSerializer.Serialize(message));
         }
     }
 
@@ -143,13 +144,13 @@ public sealed partial class MainPageViewModel : BaseViewModel
         string? appIcon = string.Empty;
         if (!string.IsNullOrEmpty(notification.AppPackage))
         {
-            appIcon = RemoteAppsRepository.GetAppIcon(notification.AppPackage);
+            appIcon = IconUtils.GetAppIconPath(notification.AppPackage);
         }
         var started = await ScreenMirrorService.StartScrcpy(Device!, $"--new-display --start-app={notification.AppPackage}", appIcon);
 
         // Scrcpy doesn't have a way of opening notifications afaik, so we will just have the notification listener on Android to open it for us
         // Plus we have to wait (2s will do ig?) until the app is actually launched to send the intent for launching the notification since Google added a lot more restrictions in this particular case
-        if (started && Device!.Session != null)
+        if (started && Device!.Session is not null)
         {
             await Task.Delay(2000);
             SessionManager.SendMessage(Device.Session, SocketMessageSerializer.Serialize(notificationToInvoke));
@@ -182,7 +183,7 @@ public sealed partial class MainPageViewModel : BaseViewModel
     {
         ((INotifyPropertyChanged)DeviceManager).PropertyChanged += (s, e) =>
         {
-            if (e.PropertyName == nameof(IDeviceManager.ActiveDevice))
+            if (e.PropertyName is nameof(IDeviceManager.ActiveDevice))
                 OnPropertyChanged(nameof(Device));
         };
     }

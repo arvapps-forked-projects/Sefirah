@@ -36,30 +36,27 @@ public sealed partial class AppsViewModel : BaseViewModel
     [RelayCommand]
     public void RefreshApps()
     {
-        if (DeviceManager.ActiveDevice == null) return;
+        if (DeviceManager.ActiveDevice is null) return;
 
         IsLoading = true;
         var message = new CommandMessage { CommandType = CommandType.RequestAppList };
         SessionManager.SendMessage(DeviceManager.ActiveDevice!.Session!, SocketMessageSerializer.Serialize(message));
     }
 
-    [RelayCommand]
     public void PinApp(ApplicationInfo app)
     {
         try
         {
-            if (app == null || DeviceManager.ActiveDevice == null) return;
-
             if (app.DeviceInfo.Pinned)
             {
                 app.DeviceInfo.Pinned = false;
-                RemoteAppsRepository.UnpinApp(app, DeviceManager.ActiveDevice.Id);
+                RemoteAppsRepository.UnpinApp(app, DeviceManager.ActiveDevice!.Id);
                 PinnedApps.Remove(app);
             }
             else
             {
                 app.DeviceInfo.Pinned = true;
-                RemoteAppsRepository.PinApp(app, DeviceManager.ActiveDevice.Id);
+                RemoteAppsRepository.PinApp(app, DeviceManager.ActiveDevice!.Id);
                 PinnedApps.Add(app);
             }
             OnPropertyChanged(nameof(HasPinnedApps));
@@ -70,13 +67,10 @@ public sealed partial class AppsViewModel : BaseViewModel
         }
     }
 
-    [RelayCommand]
-    public async Task UninstallApp(ApplicationInfo app)
+    public async void UninstallApp(ApplicationInfo app)
     {
         try
         {
-            if (app == null) return;
-
             await AdbService.UninstallApp(DeviceManager.ActiveDevice!.Id, app.PackageName);
             Apps.Remove(app);
             PinnedApps.Remove(app);
@@ -98,12 +92,12 @@ public sealed partial class AppsViewModel : BaseViewModel
     {
         try
         {
+            Logger.LogInformation("Loading apps");
             IsLoading = true;
 
-            var activeDevice = DeviceManager.ActiveDevice;
-            if (activeDevice == null) return;
+            if (DeviceManager.ActiveDevice is null) return;
 
-            await RemoteAppsRepository.LoadApplicationsFromDevice(activeDevice.Id);
+            await RemoteAppsRepository.LoadApplicationsFromDevice(DeviceManager.ActiveDevice.Id);
             await App.MainWindow.DispatcherQueue.EnqueueAsync(() =>
             {
                 PinnedApps.Clear();
@@ -120,65 +114,35 @@ public sealed partial class AppsViewModel : BaseViewModel
         }
         finally
         {
-            await App.MainWindow.DispatcherQueue.EnqueueAsync(() =>
-            {
-                IsLoading = false;
-            });
+            await App.MainWindow.DispatcherQueue.EnqueueAsync(() => IsLoading = false);
         }
     }
 
     private void OnApplicationListUpdated(object? sender, string deviceId)
     {
-        App.MainWindow.DispatcherQueue.EnqueueAsync(() =>
-        {
-            IsLoading = false;
-            OnPropertyChanged(nameof(IsEmpty));
-            OnPropertyChanged(nameof(HasPinnedApps));
-        });
+        App.MainWindow.DispatcherQueue.EnqueueAsync(() => IsLoading = false);
+        OnPropertyChanged(nameof(IsEmpty));
+        OnPropertyChanged(nameof(HasPinnedApps));
     }
 
     public async Task OpenApp(string appPackage, string appName)
     {
         await App.MainWindow.DispatcherQueue.EnqueueAsync(async () =>
         {
+            var app = Apps.First(a => a.PackageName == appPackage);
+            app.IsLoading = true;
             try
             {
-                var activeDevice = DeviceManager.ActiveDevice;
-                if (activeDevice == null)
+                Logger.LogDebug("Opening app: {AppPackage}", appPackage);
+                var started = await ScreenMirrorService.StartScrcpy(DeviceManager.ActiveDevice!, $"--start-app={appPackage} --window-title=\"{appName}\"", app.IconPath);
+                if (started)
                 {
-                    Logger.LogWarning("Cannot open app - no active device");
-                    return;
-                }
-
-                var app = Apps.FirstOrDefault(a => a.PackageName == appPackage);
-                if (app == null)
-                {
-                    Logger.LogWarning("App not found: {AppPackage}", appPackage);
-                    return;
-                }
-
-                var index = Apps.IndexOf(app);
-                try
-                {
-                    Apps[index].IsLoading = true;
-                    Logger.LogDebug("Opening app: {AppPackage} on device: {DeviceId}", appPackage, activeDevice.Id);
-
-                    // Use the icon path directly for saving
-                    var filePath = app.IconPath;
-                    var started = await ScreenMirrorService.StartScrcpy(device: activeDevice, customArgs: $"--start-app={appPackage} --window-title=\"{appName}\"", iconPath: filePath);
-                    if (started)
-                    {
-                        await Task.Delay(2000);
-                    }
-                }
-                finally
-                {
-                    Apps[index].IsLoading = false;
+                    await Task.Delay(2000);
                 }
             }
-            catch (Exception ex)
+            finally
             {
-                Logger.LogError(ex, "Error opening app: {AppPackage}", appPackage);
+                app.IsLoading = false;
             }
         });
     }
@@ -192,7 +156,7 @@ public sealed partial class AppsViewModel : BaseViewModel
         RemoteAppsRepository.ApplicationListUpdated += OnApplicationListUpdated;
         ((INotifyPropertyChanged)DeviceManager).PropertyChanged += (s, e) =>
         {
-            if (e.PropertyName == nameof(IDeviceManager.ActiveDevice))
+            if (e.PropertyName is nameof(IDeviceManager.ActiveDevice))
                 LoadApps();
         };
     }
